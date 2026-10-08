@@ -8,37 +8,53 @@ st.set_page_config(page_title="AI Shorts Generator", page_icon="🎬", layout="c
 st.title("AI Shorts Video Generator")
 st.caption("Auto 50-60s Shorts Generator")
 
-# Streamlit Secrets se Groq Key lena (Secure)
-GROQ_KEY = st.secrets.get("GROQ_KEY", "")
+GROQ_KEY = st.secrets.get("GROQ_KEY", "").strip()
 PIXABAY_KEY = "57940136-a7d5b1dcfff829dec1a7d"
 
-# 1. Groq REST API se script generate karna
+# 1. एरर-प्रूफ स्क्रिप्ट जनरेटर
 def make_script(topic):
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {GROQ_KEY}",
-        "Content-Type": "application/json; charset=utf-8"
-    }
-    payload = {
-        "model": "llama-3.1-8b-instant",
-        "messages": [
-            {
-                "role": "user",
-                "content": f"Write an engaging 50-second spoken Hindi script for YouTube Shorts on: '{topic}'. Plain spoken Hindi words only in Devanagari script, strictly around 110 words."
+    prompt_text = f"Write an engaging 50-second spoken Hindi script for YouTube Shorts on: '{topic}'. Plain spoken Hindi words only in Devanagari script, strictly around 110 words."
+    
+    # कोशिश 1: Groq API
+    if GROQ_KEY:
+        try:
+            url = "https://api.groq.com/openai/v1/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {GROQ_KEY}",
+                "Content-Type": "application/json; charset=utf-8"
             }
-        ]
-    }
-    res = requests.post(url, headers=headers, json=payload, timeout=30)
-    data = res.json()
-    return data["choices"][0]["message"]["content"].strip()
+            payload = {
+                "model": "llama-3.1-8b-instant",
+                "messages": [{"role": "user", "content": prompt_text}]
+            }
+            res = requests.post(url, headers=headers, json=payload, timeout=20)
+            data = res.json()
+            if "choices" in data and len(data["choices"]) > 0:
+                return data["choices"][0]["message"]["content"].strip()
+            elif "error" in data:
+                st.warning(f"Groq Notice: {data['error'].get('message', 'Key issue')}, switching to backup AI...")
+        except Exception:
+            pass
 
-# 2. Hindi Voiceover
+    # कोशिश 2: फ्री बैकअप AI (ताकि काम कभी न रुके)
+    try:
+        backup_url = "https://text.pollinations.ai/" + requests.utils.quote(prompt_text)
+        res_backup = requests.get(backup_url, timeout=20)
+        if res_backup.status_code == 200 and len(res_backup.text) > 40:
+            return res_backup.text.strip()
+    except Exception:
+        pass
+
+    # कोशिश 3: इमरजेंसी स्क्रिप्ट
+    return f"{topic} हमारे जीवन का एक अत्यंत महत्वपूर्ण और प्रेरणादायक पहलू है। जब हम इसके गहरे अर्थ को समझने का प्रयास करते हैं, तो हमें जीवन में एक नई ऊर्जा और शांति का अनुभव होता है। अपने मन को सकारात्मक रखें, निरंतर आगे बढ़ते रहें और अपने कर्म पर पूरा विश्वास रखें।"
+
+# 2. हिंदी आवाज़
 async def make_audio(text, output_audio="voice.mp3"):
     comm = edge_tts.Communicate(text, voice="hi-IN-MadhurNeural")
     await comm.save(output_audio)
     return output_audio
 
-# 3. Background Video
+# 3. बैकग्राउंड वीडियो
 def get_video(topic, output_video="bg.mp4"):
     clean_topic = topic.split()[0] if topic else "nature"
     url = f"https://pixabay.com/api/videos/?key={PIXABAY_KEY}&q={clean_topic}&video_type=film"
@@ -55,7 +71,7 @@ def get_video(topic, output_video="bg.mp4"):
         f.write(video_bytes)
     return output_video
 
-# 4. Final Video Render
+# 4. वीडियो रेंडरिंग
 def render_video(v_path, a_path, out_path="final_reel.mp4"):
     cmd = (
         f'ffmpeg -y -stream_loop -1 -i "{v_path}" -i "{a_path}" '
@@ -68,9 +84,7 @@ def render_video(v_path, a_path, out_path="final_reel.mp4"):
 topic_input = st.text_input("Enter Topic:", placeholder="e.g. dharmik bhakti, space facts...")
 
 if st.button("Generate Video", type="primary"):
-    if not GROQ_KEY:
-        st.error("GROQ_KEY not found in Streamlit Secrets! Please add it in App Settings.")
-    elif not topic_input.strip():
+    if not topic_input.strip():
         st.warning("Please enter a topic first!")
     else:
         status = st.empty()
