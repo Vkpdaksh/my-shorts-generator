@@ -6,34 +6,31 @@ from groq import Groq
 import edge_tts
 
 st.set_page_config(page_title="AI Shorts Generator", page_icon="🎬", layout="centered")
-st.title("🎬 AI Shorts Video Generator")
-st.caption("बिना किसी एरर या लोड के 50-60 सेकंड के वायरल शॉर्ट्स बनाएँ")
+st.title("AI Shorts Video Generator")
+st.caption("Auto 50-60s Shorts Generator")
 
-# Keys
-GROQ_KEY = "यहाँ_अपनी_GROQ_KEY_पेस्ट_करें"
+GROQ_KEY = st.secrets.get("GROQ_KEY", "")
 PIXABAY_KEY = "57940136-a7d5b1dcfff829dec1a7d"
 
-# 1. 50 सेकंड की स्क्रिप्ट
 def make_script(topic):
     client = Groq(api_key=GROQ_KEY)
+    prompt_en = f"Write an engaging 50-second spoken Hindi script for YouTube Shorts on: '{topic}'. Plain spoken Hindi text only in Devanagari, strictly around 110 words."
     chat = client.chat.completions.create(
         messages=[
             {
                 "role": "user",
-                "content": f"Write an engaging 50-second spoken Hindi script for YouTube Shorts on: '{topic}'. Do not include scene directions, timestamps, or emojis. Strictly around 110-120 spoken words."
+                "content": prompt_en
             }
         ],
         model="llama-3.3-70b-versatile",
     )
     return chat.choices[0].message.content.strip()
 
-# 2. हिंदी वॉइसओवर
 async def make_audio(text, output_audio="voice.mp3"):
     comm = edge_tts.Communicate(text, voice="hi-IN-MadhurNeural")
     await comm.save(output_audio)
     return output_audio
 
-# 3. बैकग्राउंड वीडियो
 def get_video(topic, output_video="bg.mp4"):
     query = topic.split()[0] if topic else "nature"
     url = f"https://pixabay.com/api/videos/?key={PIXABAY_KEY}&q={query}&video_type=film"
@@ -49,7 +46,6 @@ def get_video(topic, output_video="bg.mp4"):
         f.write(data)
     return output_video
 
-# 4. वीडियो रेंडरिंग
 def render_video(v_path, a_path, out_path="final_reel.mp4"):
     cmd = (
         f'ffmpeg -y -stream_loop -1 -i "{v_path}" -i "{a_path}" '
@@ -59,35 +55,34 @@ def render_video(v_path, a_path, out_path="final_reel.mp4"):
     os.system(cmd)
     return out_path
 
-# वेब इंटरफ़ेस
-topic_input = st.text_input("👉 वीडियो का टॉपिक लिखें:", placeholder="उदा. Amazing Space Facts, Motivational, सेहत के नुस्खे...")
+topic_input = st.text_input("Enter Topic:", placeholder="e.g. dharmik bhakti, space facts...")
 
-if st.button("🚀 वीडियो बनाएँ (1-Click)", type="primary"):
-    if not topic_input.strip():
-        st.warning("कृपया पहले कोई टॉपिक लिखें!")
+if st.button("Generate Video", type="primary"):
+    if not GROQ_KEY:
+        st.error("Please add GROQ_KEY in Streamlit Secrets!")
+    elif not topic_input.strip():
+        st.warning("Please enter a topic first!")
     else:
         status = st.empty()
-        
-        status.info("⏳ 1/4: स्क्रिप्ट लिखी जा रही है...")
+        status.info("1/4: Generating script...")
         script = make_script(topic_input)
         
-        status.info("⏳ 2/4: आवाज़ (Voiceover) तैयार हो रही है...")
+        status.info("2/4: Generating voiceover...")
         asyncio.run(make_audio(script))
         
-        status.info("⏳ 3/4: HD बैकग्राउंड वीडियो लाया जा रहा है...")
+        status.info("3/4: Fetching stock video...")
         get_video(topic_input)
         
-        status.info("⏳ 4/4: वीडियो रेंडर हो रहा है...")
+        status.info("4/4: Merging and rendering final video...")
         render_video("bg.mp4", "voice.mp3", "final_reel.mp4")
         
-        status.success("✓ आपका वीडियो पूरी तरह तैयार है!")
-        
+        status.success("Done! Video is ready.")
         st.video("final_reel.mp4")
         
         with open("final_reel.mp4", "rb") as f:
             st.download_button(
-                label="⬇️ वीडियो डाउनलोड करें",
+                label="Download Video",
                 data=f,
-                file_name=f"{topic_input[:15]}_shorts.mp4",
+                file_name="shorts_video.mp4",
                 mime="video/mp4"
             )
