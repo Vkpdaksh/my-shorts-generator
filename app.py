@@ -9,7 +9,7 @@ import imageio_ffmpeg
 
 st.set_page_config(page_title="AI Shorts & Talking Face Generator", page_icon="🎬", layout="centered")
 st.title("🎬 AI Shorts & Talking Face Generator")
-st.caption("फोटो से बोलता हुआ वीडियो या स्टॉक वीडियो रील्स 1-क्लिक में बनाएँ")
+st.caption("फोटो से बोलता हुआ वीडियो या AI रील्स 1-क्लिक में बनाएँ")
 
 GROQ_KEY = st.secrets.get("GROQ_KEY", "").strip()
 DID_KEY = st.secrets.get("DID_KEY", "").strip()
@@ -50,23 +50,24 @@ async def make_audio(text, output_audio="voice.mp3"):
     await comm.save(output_audio)
     return output_audio
 
-# 3. Photo se Talking Face Video (D-ID API)
+# 3. Direct D-ID Talking Face Generator (No Third-Party Uploads)
 def generate_talking_face(image_file, script_text, out_path="final_reel.mp4"):
-    with open("temp_face.jpg", "wb") as f:
-        f.write(image_file.getbuffer())
+    headers_auth = {"Authorization": f"Basic {DID_KEY}"}
 
-    # Free Image Hosting for D-ID
-    with open("temp_face.jpg", "rb") as file:
-        img_res = requests.post(
-            "https://api.imgbb.com/1/upload?key=8e68c9ff09c5dc2bc178876c16ce6dc0",
-            files={"image": file},
-            timeout=30
-        )
-    img_url = img_res.json()["data"]["url"]
+    # Step A: Direct upload to D-ID
+    upload_url = "https://api.d-id.com/images"
+    files = {"image": (image_file.name, image_file.getvalue(), image_file.type)}
+    up_res = requests.post(upload_url, headers=headers_auth, files=files, timeout=30)
+    
+    if up_res.status_code not in [200, 201]:
+        st.error(f"Image Upload Failed: {up_res.text}")
+        return None
+        
+    img_url = up_res.json().get("url")
 
-    # D-ID Request
-    url = "https://api.d-id.com/talks"
-    headers = {
+    # Step B: Request Talking Avatar Video
+    talks_url = "https://api.d-id.com/talks"
+    headers_json = {
         "Authorization": f"Basic {DID_KEY}",
         "Content-Type": "application/json"
     }
@@ -81,18 +82,17 @@ def generate_talking_face(image_file, script_text, out_path="final_reel.mp4"):
         "config": {"fluent": "false", "pad_audio": "0.0"}
     }
     
-    response = requests.post(url, json=payload, headers=headers)
-    talk_data = response.json()
-    talk_id = talk_data.get("id")
-    
-    if not talk_id:
-        st.error(f"D-ID API Notice: {response.text}")
+    talk_res = requests.post(talks_url, json=payload, headers=headers_json, timeout=20)
+    if talk_res.status_code not in [200, 201]:
+        st.error(f"D-ID Creation Notice: {talk_res.text}")
         return None
+        
+    talk_id = talk_res.json().get("id")
 
-    # Wait for completion
-    for _ in range(35):
+    # Step C: Poll for finished video
+    for _ in range(40):
         time.sleep(3)
-        chk = requests.get(f"{url}/{talk_id}", headers=headers).json()
+        chk = requests.get(f"{talks_url}/{talk_id}", headers=headers_json).json()
         if chk.get("status") == "done":
             video_url = chk.get("result_url")
             v_data = requests.get(video_url).content
@@ -100,12 +100,12 @@ def generate_talking_face(image_file, script_text, out_path="final_reel.mp4"):
                 f.write(v_data)
             return out_path
         elif chk.get("status") == "error":
-            st.error("Face animation error occurred.")
+            st.error("Face animation processing error.")
             return None
             
     return None
 
-# 4. Stock Video Fetch (Fallback / No-Photo Mode)
+# 4. Background Video Fetch (Normal Mode)
 def get_video(topic, output_video="bg.mp4"):
     if os.path.exists(output_video):
         try:
@@ -139,7 +139,7 @@ def get_video(topic, output_video="bg.mp4"):
 
     return output_video
 
-# 5. FFmpeg Merge for normal mode
+# 5. FFmpeg Merge (Normal Mode)
 def render_video(v_path, a_path, out_path="final_reel.mp4"):
     if os.path.exists(out_path):
         os.remove(out_path)
@@ -162,7 +162,7 @@ def render_video(v_path, a_path, out_path="final_reel.mp4"):
     subprocess.run(cmd_fallback, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     return out_path
 
-# UI
+# UI Controls
 topic_input = st.text_input("👉 वीडियो का टॉपिक लिखें:", placeholder="उदा. Daily Motivation, Dharmik Gyaan...")
 uploaded_face = st.file_uploader("📸 फोटो अपलोड करें (चेहरा बुलवाने के लिए - Optional):", type=["jpg", "png", "jpeg"])
 
