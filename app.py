@@ -4,6 +4,7 @@ import subprocess
 import requests
 import streamlit as st
 import edge_tts
+import imageio_ffmpeg
 
 st.set_page_config(page_title="AI Shorts Generator", page_icon="🎬", layout="centered")
 st.title("AI Shorts Video Generator")
@@ -11,7 +12,7 @@ st.caption("Auto 50-60s Shorts Generator")
 
 GROQ_KEY = st.secrets.get("GROQ_KEY", "").strip()
 
-# 1. Script Generator
+# 1. AI Script Generator
 def make_script(topic):
     prompt_text = f"Write an engaging 50-second spoken Hindi script for YouTube Shorts on: '{topic}'. Plain spoken Hindi text only in Devanagari script, strictly around 110 words."
     models = ["llama-3.3-70b-versatile", "llama-3.1-70b-versatile", "mixtral-8x7b-32768"]
@@ -46,16 +47,8 @@ async def make_audio(text, output_audio="voice.mp3"):
     await comm.save(output_audio)
     return output_audio
 
-# 3. 100% Reliable HD Stock Video
+# 3. Stock Background Video
 def get_video(topic, output_video="bg.mp4"):
-    # Reliable high-speed Direct MP4 links
-    stock_urls = [
-        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
-        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/WeAreGoingOnBullrun.mp4",
-        "https://assets.mixkit.co/videos/preview/mixkit-tree-branches-in-the-breeze-1188-large.mp4"
-    ]
-    
-    # Try fetching from Pixabay first
     v_url = None
     try:
         clean_topic = topic.split()[0] if topic else "nature"
@@ -69,9 +62,8 @@ def get_video(topic, output_video="bg.mp4"):
         pass
 
     if not v_url:
-        v_url = stock_urls[0]
+        v_url = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
 
-    # Download with proper stream check
     r = requests.get(v_url, stream=True, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
     with open(output_video, "wb") as f:
         for chunk in r.iter_content(chunk_size=1024*1024):
@@ -80,14 +72,32 @@ def get_video(topic, output_video="bg.mp4"):
                 
     return output_video
 
-# 4. Ultra-Stable Render
+# 4. Built-in FFmpeg Render (No System Errors)
 def render_video(v_path, a_path, out_path="final_reel.mp4"):
     if os.path.exists(out_path):
         os.remove(out_path)
     
-    cmd = f'ffmpeg -y -stream_loop -1 -i "{v_path}" -i "{a_path}" -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920" -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac -shortest "{out_path}"'
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
     
-    subprocess.run(cmd, shell=True, check=True)
+    cmd = [
+        ffmpeg_exe, "-y",
+        "-stream_loop", "-1",
+        "-i", v_path,
+        "-i", a_path,
+        "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920",
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-shortest",
+        out_path
+    ]
+    
+    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if res.returncode != 0:
+        st.error(f"Render Details: {res.stderr[-400:]}")
+        raise RuntimeError("Video render failed")
+        
     return out_path
 
 topic_input = st.text_input("Enter Topic:", placeholder="e.g. dharmik bhakti, space facts...")
